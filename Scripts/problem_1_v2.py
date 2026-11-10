@@ -142,7 +142,19 @@ def heatSolver(N, l, f, u_0, t_max, t_steps=None, method="FE"):
                 u_temp = spla.cho_solve(A_b_chol,z)
                 u.append(u_temp.reshape(N_trunc,N_trunc))
         case "RK2":
-            print("Method not yet implemented")    
+            print("Building BE system")
+            if t_steps is None:   # enforce CFL condition on time stepping
+                t_steps = int(np.ceil(4.0 * t_max / dx**2)) # technically not required for BE, but we'll reuse backward euler CFL
+            L = laplacian_2d(N-2, l-2.0*dx) # take off 2 in each dimension 
+            dt = t_max/t_steps
+            u_temp = u[0].ravel()
+            print("Solving FE system")
+            for i in range(t_steps):
+                print(f"solving for t={(i+1)*dt}")
+                k1 = dt/2.0 * (L @ u_temp + f(xx_vec, yy_vec, i*dt))
+                k2 = dt * (L @ (u_temp+k1) + f(xx_vec, yy_vec, (i + 0.5)*dt))
+                u_temp = u_temp + k2
+                u.append(u_temp.reshape(N_trunc,N_trunc))     
         case "RK45":
             print("Method not yet implemented")
         case _:
@@ -158,13 +170,14 @@ def main():
     u0 = lambda x,y,t: np.sin(x) * np.sin(y)
     u_exact = lambda x,y,t : np.cos(10.0 * t) * np.sin(x) * np.sin(y)
     t_max = 2.0*np.pi
-    t_steps = 10
+    #t_steps = 10
 
     # Get solutions
     #sol_FE = heatSolver(N, L, f, u0, t_max, t_steps, method="FE")
     #sol_FE = heatSolver(N, L, f, u0, t_max, method="FE")
     #sol_FE = heatSolver(N, L, f, u0, t_max, t_steps, method="BE")
-    sol_FE = heatSolver(N, L, f, u0, t_max, t_steps, method="CN")
+    #sol_FE = heatSolver(N, L, f, u0, t_max, t_steps, method="CN")
+    sol_FE = heatSolver(N, L, f, u0, t_max, method="RK2")
     sol_exact = u_exact(sol_FE[0], sol_FE[1], t_max)
     err = sol_FE[2][-1] - sol_exact
 
