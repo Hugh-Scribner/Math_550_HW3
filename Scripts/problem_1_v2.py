@@ -118,7 +118,29 @@ def heatSolver(N, l, f, u_0, t_max, t_steps=None, method="FE"):
                 u_temp = spla.cho_solve(A_chol,z)
                 u.append(u_temp.reshape(N_trunc,N_trunc)) 
         case "CN":
-            print("Method not yet implemented")
+            # CN solver
+            # Set up required values
+            print("Building CN system")
+            if t_steps is None:   # enforce CFL condition on time stepping
+                t_steps = int(np.ceil(t_max/.1))
+            L = laplacian_2d(N-2, l-2.0*dx) # take off 2 in each dimension 
+            I = spa.identity(L.shape[0], format='coo')
+            dt = t_max/t_steps
+        
+            # build matricies
+            A_f = (I + dt/2*L).tocsr()
+            A_b = (I - dt/2*L).toarray()
+            A_b_chol = spla.cho_factor(A_b)
+        
+            # initialize RHS
+            u_temp = u[0].ravel()
+        
+            print("Solving CN system")
+            for i in range(t_steps):
+                print(f"solving for t={(i+1)*dt}")
+                z = A_f @ u_temp + dt/2.0 * (f(xx_vec,yy_vec,i*dt) + f(xx_vec,yy_vec, (i+1)*dt))
+                u_temp = spla.cho_solve(A_b_chol,z)
+                u.append(u_temp.reshape(N_trunc,N_trunc))
         case "RK2":
             print("Method not yet implemented")    
         case "RK45":
@@ -140,7 +162,9 @@ def main():
 
     # Get solutions
     #sol_FE = heatSolver(N, L, f, u0, t_max, t_steps, method="FE")
-    sol_FE = heatSolver(N, L, f, u0, t_max, t_steps, method="BE")
+    #sol_FE = heatSolver(N, L, f, u0, t_max, method="FE")
+    #sol_FE = heatSolver(N, L, f, u0, t_max, t_steps, method="BE")
+    sol_FE = heatSolver(N, L, f, u0, t_max, t_steps, method="CN")
     sol_exact = u_exact(sol_FE[0], sol_FE[1], t_max)
     err = sol_FE[2][-1] - sol_exact
 
