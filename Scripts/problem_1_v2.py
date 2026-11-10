@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.sparse as spa
-import scipy.sparse.linalg as spla
+import scipy.linalg as spla
 import sys
 
 def laplacian_2d(N, L):
@@ -71,7 +71,8 @@ def heatSolver(N, l, f, u_0, t_max, t_steps=None, method="FE"):
     x = x[1:-1] # Truncate off boundaries 
     y = y[1:-1] 
     xx, yy = np.meshgrid(x,y, indexing = 'ij')
-    
+    xx_vec, yy_vec = xx.ravel(), yy.ravel() # get grids into a convenient shape for multiple calcs of f
+
     b = u_0(xx,yy,0)
     
     # Apply BCs
@@ -86,9 +87,7 @@ def heatSolver(N, l, f, u_0, t_max, t_steps=None, method="FE"):
     match method:
         case "FE":
             print("Building FE system")
-            xx_vec = xx.ravel() # get grids into a convenient shape for multiple calcs of f
-            yy_vec = yy.ravel()
-            if t_steps==None:   # enforce CFL condition on time stepping
+            if t_steps is None:   # enforce CFL condition on time stepping
                 t_steps = int(np.ceil(4.0 * t_max / dx**2))
             L = laplacian_2d(N-2, l-2.0*dx) # take off 2 in each dimension 
             I = spa.identity(L.shape[0], format='coo')
@@ -102,12 +101,22 @@ def heatSolver(N, l, f, u_0, t_max, t_steps=None, method="FE"):
                 u_temp = A @ u_temp + dt * f(xx_vec,yy_vec,i*dt) # We use tn for FE
                 u.append(u_temp.reshape(N_trunc,N_trunc)) 
         case "BE":
-            print("Method not yet implemented")
-            L = laplacian_2d(N, l)
+            print("Building BE system")
+            if t_steps is None:   # enforce CFL condition on time stepping
+                t_steps = int(np.ceil(4.0 * t_max / dx**2)) # technically not required for BE, but we'll reuse backward euler CFL
+            L = laplacian_2d(N-2, l-2.0*dx) # take off 2 in each dimension 
             I = spa.identity(L.shape[0], format='coo')
+            dt = t_max/t_steps
             A = I - dt*L
+            A = A.toarray()
+            A_chol = spla.cho_factor(A) # Claude recommended a banded cholesky solve instead - is that important for this homework?
+            u_temp = u[0].ravel()
+            print("Solving FE system")
             for i in range(t_steps):
-                u.append(spla.solve(A, u[i])) 
+                print(f"solving for t={(i+1)*dt}")
+                z = u_temp + dt * f(xx_vec,yy_vec,(i+1)*dt) # Apply the forcing update to the time step, use tn+1 for BE
+                u_temp = spla.cho_solve(A_chol,z)
+                u.append(u_temp.reshape(N_trunc,N_trunc)) 
         case "CN":
             print("Method not yet implemented")
         case "RK2":
@@ -127,11 +136,11 @@ def main():
     u0 = lambda x,y,t: np.sin(x) * np.sin(y)
     u_exact = lambda x,y,t : np.cos(10.0 * t) * np.sin(x) * np.sin(y)
     t_max = 2.0*np.pi
-    #t_steps = 10000
+    t_steps = 10
 
     # Get solutions
     #sol_FE = heatSolver(N, L, f, u0, t_max, t_steps, method="FE")
-    sol_FE = heatSolver(N, L, f, u0, t_max, method="FE")
+    sol_FE = heatSolver(N, L, f, u0, t_max, t_steps, method="BE")
     sol_exact = u_exact(sol_FE[0], sol_FE[1], t_max)
     err = sol_FE[2][-1] - sol_exact
 
