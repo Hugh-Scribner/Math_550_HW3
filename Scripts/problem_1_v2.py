@@ -1,8 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.sparse as spa
-import scipy.linalg as spla
+import scipy.sparse.linalg as spla
 import sys
+from scipy.integrate import RK45
 
 def laplacian_2d(N, L):
     """
@@ -97,7 +98,6 @@ def heatSolver(N, l, f, u_0, t_max, t_steps=None, method="FE"):
             u_temp = u[0].ravel()
             print("Solving FE system")
             for i in range(t_steps):
-                #print(f"solving for t={(i+1)*dt}")
                 u_temp = A @ u_temp + dt * f(xx_vec,yy_vec,i*dt) # We use tn for FE
                 u.append(u_temp.reshape(N_trunc,N_trunc)) 
         case "BE":
@@ -108,14 +108,12 @@ def heatSolver(N, l, f, u_0, t_max, t_steps=None, method="FE"):
             I = spa.identity(L.shape[0], format='coo')
             dt = t_max/t_steps
             A = I - dt*L
-            A = A.toarray()
-            A_chol = spla.cho_factor(A) # Claude recommended a banded cholesky solve instead - is that important for this homework?
+            A_lu = spla.splu(A) # Claude recommended a banded cholesky solve instead - is that important for this homework?
             u_temp = u[0].ravel()
             print("Solving FE system")
             for i in range(t_steps):
-                print(f"solving for t={(i+1)*dt}")
                 z = u_temp + dt * f(xx_vec,yy_vec,(i+1)*dt) # Apply the forcing update to the time step, use tn+1 for BE
-                u_temp = spla.cho_solve(A_chol,z)
+                u_temp = A_lu.solve(z)
                 u.append(u_temp.reshape(N_trunc,N_trunc)) 
         case "CN":
             # CN solver
@@ -129,55 +127,87 @@ def heatSolver(N, l, f, u_0, t_max, t_steps=None, method="FE"):
         
             # build matricies
             A_f = (I + dt/2*L).tocsr()
-            A_b = (I - dt/2*L).toarray()
-            A_b_chol = spla.cho_factor(A_b)
+            A_b = (I - dt/2*L)
+            A_b_lu = spla.splu(A_b)
         
             # initialize RHS
             u_temp = u[0].ravel()
         
             print("Solving CN system")
             for i in range(t_steps):
-                print(f"solving for t={(i+1)*dt}")
                 z = A_f @ u_temp + dt/2.0 * (f(xx_vec,yy_vec,i*dt) + f(xx_vec,yy_vec, (i+1)*dt))
-                u_temp = spla.cho_solve(A_b_chol,z)
+                u_temp = A_b_lu.solve(z)
                 u.append(u_temp.reshape(N_trunc,N_trunc))
         case "RK2":
-            print("Building BE system")
+            print("Building RK2 system")
             if t_steps is None:   # enforce CFL condition on time stepping
                 t_steps = int(np.ceil(4.0 * t_max / dx**2)) # technically not required for BE, but we'll reuse backward euler CFL
             L = laplacian_2d(N-2, l-2.0*dx) # take off 2 in each dimension 
             dt = t_max/t_steps
             u_temp = u[0].ravel()
-            print("Solving FE system")
+            print("Solving RK2 system")
             for i in range(t_steps):
-                print(f"solving for t={(i+1)*dt}")
                 k1 = dt/2.0 * (L @ u_temp + f(xx_vec, yy_vec, i*dt))
                 k2 = dt * (L @ (u_temp+k1) + f(xx_vec, yy_vec, (i + 0.5)*dt))
                 u_temp = u_temp + k2
                 u.append(u_temp.reshape(N_trunc,N_trunc))     
+        case "BDF2":
+            print("Building BDF system")
+            if t_steps is None:   # enforce CFL condition on time stepping
+                t_steps = int(np.ceil(4.0 * t_max / dx**2)) # technically not required for BE, but we'll reuse backward euler CFL
+            L = laplacian_2d(N-2, l-2.0*dx) # take off 2 in each dimension 
+            I = spa.identity(L.shape[0], format='csc')
+            dt = t_max/t_steps 
+            A_BE = I - dt*L # A for BE
+
+            # Cholesky factorization for BFD
+            A_BDF = (I - 2.0/3.0 * dt * L)
+            A_BDF_lu = spla.splu(A_BDF)
+
+            # Calc BE step, cholesky doesn't pay off here
+            u_temp0 = u[0].ravel()
+            u_temp1 = spla.spsolve(A_BE, u_temp0 + dt * f(xx_vec,yy_vec,dt)) # Use a FE step to get first multistep
+            u.append(u_temp1.reshape(N_trunc,N_trunc))
+           
+            print("Solving BDF system")
+            for i in range(1,t_steps):
+                z = 4.0 / 3.0 * u_temp1 - 1.0/3.0 * u_temp0 + 2.0/3.0 * dt * f(xx_vec,yy_vec,(i+1)*dt) # Apply the forcing update to the time step, use tn+1 for BE
+                u_temp0 = u_temp1
+                u_temp1 = A_BDF_lu.solve(z)
+                u.append(u_temp1.reshape(N_trunc,N_trunc)) 
         case "RK45":
-            print("Method not yet implemented")
+            L = laplacian_2d(N-2, l-2.0*dx)
+            ode = lambda t,c : L @ c + f(xx_vec, yy_vec, t)
+            u_temp = u[0].ravel() 
+            solver = RK45(ode, 0, u_temp, t_max, rtol=1e-5, atol=1e-8)
+            while(solver.t < t_max):
+                print(solver.t)
+                solver.step()
+                u.append((solver.y).reshape(N_trunc,N_trunc))
         case _:
             print("Invalid method")
             sys.exit()
+            
     sol = [xx,yy,u]
     return sol
 
 def main():
     colormap = "inferno"
-    N, L = 128, 2*np.pi
+    N, L = 64, 2*np.pi
     f = lambda x,y,t: 2.0 * np.sin(x) * np.sin(y) * (np.cos(10.0*t) - 5.0 * np.sin(10.0 * t))
     u0 = lambda x,y,t: np.sin(x) * np.sin(y)
     u_exact = lambda x,y,t : np.cos(10.0 * t) * np.sin(x) * np.sin(y)
     t_max = 2.0*np.pi
-    #t_steps = 10
+    t_steps = 2000
 
     # Get solutions
     #sol_FE = heatSolver(N, L, f, u0, t_max, t_steps, method="FE")
     #sol_FE = heatSolver(N, L, f, u0, t_max, method="FE")
     #sol_FE = heatSolver(N, L, f, u0, t_max, t_steps, method="BE")
     #sol_FE = heatSolver(N, L, f, u0, t_max, t_steps, method="CN")
-    sol_FE = heatSolver(N, L, f, u0, t_max, method="RK2")
+    #sol_FE = heatSolver(N, L, f, u0, t_max, method="RK2")
+    #sol_FE = heatSolver(N, L, f, u0, t_max, t_steps, method="BDF2")
+    sol_FE = heatSolver(N, L, f, u0, t_max, method="RK45")
     sol_exact = u_exact(sol_FE[0], sol_FE[1], t_max)
     err = sol_FE[2][-1] - sol_exact
 
