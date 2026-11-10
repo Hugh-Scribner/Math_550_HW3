@@ -43,39 +43,104 @@ def coloredSpy(A, colormap = "coolwarm", filepath = "Images\\Spy.png"):
     plt.close(fig)
     return 0
 
-def HeatSolver(N, l, num_time_steps, t_max, f, method):
+def heatSolver(N, l, f, u_0, t_max, t_steps=None, method="FE"):
+    '''
+    This function solves the heat equation using the method of finite differences and a users choice of method
+
+    inputs
+    ------
+    N : number of internal nodes in one direction in spatial variables
+    l : length of one spatial edge
+    u0 : initial condition
+    f : forcing function
+    t_max : time you want to solve the heat equation till
+    t_steps : the number of steps you want to take to get to t_max
+    method : Short string that describes the method you want to use for time stepping
+
+    outputs
+    -------
+    sol : 4 item list containing X grid, Y grid, time of each step, and a list of snap shots of u 
+    '''
     u = []
+    N_trunc= N-2
+
+    # Build mesh and Right hand side
+    dx = l/(N-1)
+    x = np.linspace(0, l, num = N, endpoint = True)
+    y = np.linspace(0, l, num = N, endpoint = True)
+    x = x[1:-1] # Truncate off boundaries 
+    y = y[1:-1] 
+    xx, yy = np.meshgrid(x,y, indexing = 'ij')
+    
+    b = u_0(xx,yy,0)
+    
+    # Apply BCs
+    b[0, :] -= 0 # Left hand BC
+    b[-1, :] -= 0 # right hand BC
+    b[:, 0] -= 0 # top BC
+    b[:, -1] -= 0 # right BC
+
+    u.append(b)
+
+    # run time stepper
     match method:
         case "FE":
-            print("Method not yet implemented")
-            L = laplacian_2d(N, l)
+            print("Building FE system")
+            xx_vec = xx.ravel() # get grids into a convenient shape for multiple calcs of f
+            yy_vec = yy.ravel()
+            if t_steps==None:   # enforce CFL condition on time stepping
+                t_steps = int(np.ceil(4.0 * t_max / dx**2))
+            L = laplacian_2d(N-2, l-2.0*dx) # take off 2 in each dimension 
             I = spa.identity(L.shape[0], format='coo')
-            dt = t_max/num_time_steps
+            dt = t_max/t_steps
             A = I + dt*L
-            for i in range(num_time_steps):
-                u.append(A @ u[i]) 
+            A = A.tocsr()
+            u_temp = u[0].ravel()
+            print("Solving FE system")
+            for i in range(t_steps):
+                #print(f"solving for t={(i+1)*dt}")
+                u_temp = A @ u_temp + dt * f(xx_vec,yy_vec,i*dt) # We use tn for FE
+                u.append(u_temp.reshape(N_trunc,N_trunc)) 
         case "BE":
             print("Method not yet implemented")
             L = laplacian_2d(N, l)
             I = spa.identity(L.shape[0], format='coo')
             A = I - dt*L
-            for i in range(num_time_steps):
+            for i in range(t_steps):
                 u.append(spla.solve(A, u[i])) 
         case "CN":
             print("Method not yet implemented")
         case "RK2":
             print("Method not yet implemented")    
-        case "RK45"
+        case "RK45":
             print("Method not yet implemented")
         case _:
             print("Invalid method")
             sys.exit()
-    return u
+    sol = [xx,yy,u]
+    return sol
 
 def main():
-    N, L = 8, 1.0
-    A = laplacian_2d(N, L)
-    coloredSpy(A)   
+    colormap = "inferno"
+    N, L = 128, 2*np.pi
+    f = lambda x,y,t: 2.0 * np.sin(x) * np.sin(y) * (np.cos(10.0*t) - 5.0 * np.sin(10.0 * t))
+    u0 = lambda x,y,t: np.sin(x) * np.sin(y)
+    u_exact = lambda x,y,t : np.cos(10.0 * t) * np.sin(x) * np.sin(y)
+    t_max = 2.0*np.pi
+    #t_steps = 10000
+
+    # Get solutions
+    #sol_FE = heatSolver(N, L, f, u0, t_max, t_steps, method="FE")
+    sol_FE = heatSolver(N, L, f, u0, t_max, method="FE")
+    sol_exact = u_exact(sol_FE[0], sol_FE[1], t_max)
+    err = sol_FE[2][-1] - sol_exact
+
+    fig = plt.figure(figsize=(9, 7))
+    ax = fig.add_subplot(111, projection="3d")
+    surf = ax.plot_surface(sol_FE[0], sol_FE[1], err, cmap=colormap)
+    fig.colorbar(surf, shrink=0.6, aspect=12, label="z")
+    plt.show()
+
     return 0
 
 if __name__ == "__main__":
