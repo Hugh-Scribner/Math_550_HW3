@@ -23,12 +23,12 @@ from functions import heatSolver
 # RK2: 2510 - immediatly goes to O(1e-5) with 2 more steps from the 5e-2 test
 # BDF2: 1115
 
-# 5e-5 - most methods needed 128x128 to converge
-# FE: Needs more than 200k iterations
-# BE: will need more than 200k iterations per FE test
-# CN: 4000-5000
-# RK2: needs more than 15000 - investigate in code
-# BDF2: 9000-10000 - needs validation
+# 5e-5 - everythong makes it with 64x64
+# FE: Needs more than 300k iterations but got close with 300k, ran 3 mil by mistake, and still only got 3.4e-5
+# BE: will need more than 300k iterations per FE test
+# CN: 1975 - ask brennan about this one - it looks like we are getting exponential convergence
+# RK2: 2800
+# BDF2: 3940 - needs validation
 
 def rel_error(u_exact, u_approx):
     """
@@ -44,8 +44,8 @@ def rel_error(u_exact, u_approx):
 
 def main():
     N = 64
-    t_steps = 3000000
-    num_meth = "FE"
+    t_steps = 3940
+    num_meth = "BDF2"
 
     L = 2*np.pi
     f = lambda x,y,t: 2.0 * np.sin(x) * np.sin(y) * (np.cos(10.0*t) - 5.0 * np.sin(10.0 * t))
