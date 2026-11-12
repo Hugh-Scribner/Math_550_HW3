@@ -28,7 +28,7 @@ from functions import heatSolver
 # BE: will need more than 300k iterations per FE test
 # CN: 1975 - ask brennan about this one - it looks like we are getting exponential convergence
 # RK2: 2800
-# BDF2: 3940 - needs validation
+# BDF2: 3940 
 
 def rel_error(u_exact, u_approx):
     """
@@ -43,9 +43,9 @@ def rel_error(u_exact, u_approx):
     return err
 
 def main():
-    N = 64
-    t_steps = 3940
-    num_meth = "BDF2"
+    N = 128
+    t_steps = 300000
+    num_meth = "RK2"
 
     L = 2*np.pi
     f = lambda x,y,t: 2.0 * np.sin(x) * np.sin(y) * (np.cos(10.0*t) - 5.0 * np.sin(10.0 * t))
